@@ -7,12 +7,15 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.Resource;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.ObjectError;
@@ -29,14 +32,18 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.example.entities.Producto;
+import com.example.model.FileUploadResponse;
 import com.example.services.ProductoService;
+import com.example.utilities.FileDownloadUtil;
 import com.example.utilities.FileUploadUtil;
 
 import jakarta.transaction.Transactional;
 import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
 
 @RestController //hace que los métodos devuelvan un JSON
 @RequestMapping("/productos")
+@RequiredArgsConstructor //para la dependencia por constructor
 public class ProductoController {
 
     @Autowired
@@ -44,6 +51,9 @@ public class ProductoController {
 
     @Autowired
     private FileUploadUtil fileUploadUtil;
+
+    // Esta dependencia se inyectará por constructor en vez de por Autowired
+    private final FileDownloadUtil fileDownloadUtil;
 
 /**
  * Recupera un producto por el id
@@ -125,6 +135,19 @@ public class ProductoController {
     if(!file.isEmpty()){
         String fileCode = fileUploadUtil.saveFile(file.getOriginalFilename(), file);
         producto.setImagenProducto(fileCode + "-" + file.getOriginalFilename());
+    
+
+    // Devolver información respecto al file recibido
+
+    FileUploadResponse fileUploadResponse = FileUploadResponse
+    .builder()
+    .fileName(fileCode + "-" + file.getOriginalFilename())
+    .downloadURI("/productos/downloadFile/" + fileCode + "-" + file.getOriginalFilename())
+    .size(file.getSize())
+    .build();
+
+    responseAsMap.put("info de la imagen: ", fileUploadResponse);
+
     }
 
     Producto productoDB = productoService.save(producto);
@@ -311,4 +334,32 @@ public ResponseEntity<String> delete(@PathVariable(name = "id") Integer id) {
     //     );
     //     return nombres;
     // }
+
+    /**
+     *  Implementa filedownnload end point API 
+     **/    
+    @GetMapping("/downloadFile/{fileCode}")
+    public ResponseEntity<?> downloadFile(@PathVariable(name = "fileCode") String fileCode) {
+
+        Resource resource = null;
+
+        try {
+            resource = fileDownloadUtil.getFileAsResource(fileCode);
+        } catch (IOException e) {
+            return ResponseEntity.internalServerError().build();
+        }
+
+        if (resource == null) {
+            return new ResponseEntity<>("File not found ", HttpStatus.NOT_FOUND);
+        }
+
+        String contentType = "application/octet-stream";
+        String headerValue = "attachment; filename=\"" + resource.getFilename() + "\"";
+
+        return ResponseEntity.ok() //MediaType : spring.framework.http
+        .contentType(MediaType.parseMediaType(contentType))
+        .header(HttpHeaders.CONTENT_DISPOSITION, headerValue) //HttpHeaders : spring.framework.http
+        .body(resource);
+
+    }
 }
